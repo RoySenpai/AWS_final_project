@@ -1,11 +1,8 @@
 #!/usr/bin/env node
-import 'source-map-support/register';
-import * as cdk from 'aws-cdk-lib';
-import { HelloCdkStack } from '../lib/hello-cdk-stack';
-import { DefaultStackSynthesizer } from 'aws-cdk-lib';
+const cdk = require('aws-cdk-lib');
+const { CdkStack } = require('../lib/cdk-stack');
 
-
-const defaultStackSynthesizer = new DefaultStackSynthesizer({
+const defaultStackSynthesizer = new cdk.DefaultStackSynthesizer({
   // Name of the S3 bucket for file assets
   fileAssetsBucketName:
     "cdk-${Qualifier}-assets-${AWS::AccountId}-${AWS::Region}",
@@ -45,8 +42,7 @@ const defaultStackSynthesizer = new DefaultStackSynthesizer({
 });
 
 const app = new cdk.App();
-new HelloCdkStack(app, 'HelloCdkStack', {
-  synthesizer: defaultStackSynthesizer,
+new CdkStack(app, 'CdkStack', {
   /* If you don't specify 'env', this stack will be environment-agnostic.
    * Account/Region-dependent features and context lookups will not work,
    * but a single synthesized template can be deployed anywhere. */
