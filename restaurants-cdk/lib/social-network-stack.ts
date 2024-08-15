@@ -25,11 +25,19 @@ export class SocialNetworkStack extends cdk.Stack {
     // Create an S3 bucket for deployment artifacts using the labRole
     const deploymentBucket = this.deployTheApplicationArtifactToS3Bucket(labRole);
 
-    // Create a Lambda function for user operations (create, get, delete)
-    const userHandler = this.createUserLambdaFunction(usersTable, profilePicturesBucket, labRole);
+    // Environment variables common to all functions
+    const commonEnv = {
+      USERS_TABLE_NAME: usersTable.tableName,
+      BUCKET_NAME: profilePicturesBucket.bucketName,
+    };
 
-    // Create an API Gateway to expose the Lambda function as a REST API
-    const api = this.createApiGateway(userHandler);
+    // Create Lambda functions for different API operations
+    const getUserFunction = this.createUserLambdaFunction('getUser.handler', '../app/getUser', commonEnv, labRole);
+    const postUserFunction = this.createUserLambdaFunction('createUser.handler', '../app/createUser', commonEnv, labRole);
+    const deleteUserFunction = this.createUserLambdaFunction('deleteUser.handler', '../app/deleteUser', commonEnv, labRole);
+
+    // Create an API Gateway to expose the Lambda functions as a REST API
+    const api = this.createApiGateway(getUserFunction, postUserFunction, deleteUserFunction);
 
     // Output the API Gateway URL
     new cdk.CfnOutput(this, 'APIGatewayURL', {
@@ -38,40 +46,35 @@ export class SocialNetworkStack extends cdk.Stack {
     });
   }
 
-  private createUserLambdaFunction(usersTable: dynamodb.Table, profilePicturesBucket: s3.Bucket, labRole: iam.IRole): lambda.Function {
-    const userHandler = new lambda.Function(this, 'UserHandler', {
+  private createUserLambdaFunction(handlerName: string, filePath: string, environment: { [key: string]: string }, labRole: iam.IRole): lambda.Function {
+    const userHandler = new lambda.Function(this, handlerName, {
       runtime: lambda.Runtime.NODEJS_18_X,
-      code: lambda.Code.fromAsset('../app'),  // Ensure the path to your lambda code is correct
-      handler: 'index.handler',
-      environment: {
-        USERS_TABLE_NAME: usersTable.tableName,
-        BUCKET_NAME: profilePicturesBucket.bucketName,
-      },
+      code: lambda.Code.fromAsset(filePath),  // Path to the specific Lambda code file
+      handler: 'index.handler',  // Use the handler name passed as an argument
+      environment: environment,  // Use the environment variables passed as an argument
       role: labRole,  // Assign the labRole to the Lambda function
     });
-
-    // Grant the Lambda function read/write permissions to the DynamoDB table
-    usersTable.grantReadWriteData(userHandler);
-
-    // Grant the Lambda function read/write permissions to the S3 bucket
-    profilePicturesBucket.grantReadWrite(userHandler);
 
     return userHandler;
   }
 
-  private createApiGateway(userHandler: lambda.Function): apigateway.RestApi {
+  private createApiGateway(getUserFunction: lambda.Function, postUserFunction: lambda.Function, deleteUserFunction: lambda.Function): apigateway.RestApi {
     const api = new apigateway.RestApi(this, 'UserApi', {
       restApiName: 'User Service',
       description: 'This service handles user operations for the social network.',
     });
 
     const users = api.root.addResource('users');
-    users.addMethod('POST', new apigateway.LambdaIntegration(userHandler)); // Create a new user
-    users.addMethod('GET', new apigateway.LambdaIntegration(userHandler)); // Get a user by ID
-    users.addMethod('DELETE', new apigateway.LambdaIntegration(userHandler)); // Delete a user by ID
 
-    const profile = users.addResource('profile');
-    profile.addMethod('POST', new apigateway.LambdaIntegration(userHandler)); // Upload profile picture
+    // Resource for GET /users/{userId}
+    const userById = users.addResource('{userId}');
+    userById.addMethod('GET', new apigateway.LambdaIntegration(getUserFunction)); // Get a user by ID
+
+    // Resource for POST /users
+    users.addMethod('POST', new apigateway.LambdaIntegration(postUserFunction)); // Create a new user
+
+    // Resource for DELETE /users/{userId}
+    userById.addMethod('DELETE', new apigateway.LambdaIntegration(deleteUserFunction)); // Delete a user by ID
 
     return api;
   }

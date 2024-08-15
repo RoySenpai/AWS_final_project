@@ -2,21 +2,26 @@ const AWS = require('aws-sdk');
 const dynamoDb = new AWS.DynamoDB.DocumentClient();
 
 exports.handler = async (event) => {
-  const { userId } = event.pathParameters;
-
-  const params = {
-    TableName: process.env.USERS_TABLE,
-    Key: {
-      userId,
-    },
-  };
-
   try {
+    const { userId } = event.pathParameters;
+
+    const params = {
+      TableName: process.env.USERS_TABLE_NAME,
+      Key: {
+        UserID: userId,
+      },
+    };
+
     const result = await dynamoDb.get(params).promise();
+    
     if (result.Item) {
       return {
         statusCode: 200,
-        body: JSON.stringify(result.Item),
+        body: JSON.stringify({
+          userId: result.Item.UserID,
+          name: result.Item.Username,
+          email: result.Item.UserEmail,
+        }),
       };
     } else {
       return {
@@ -27,7 +32,7 @@ exports.handler = async (event) => {
   } catch (error) {
     return {
       statusCode: 500,
-      body: JSON.stringify({ error: 'Could not retrieve user' }),
+      body: JSON.stringify({ error: 'Could not retrieve user', details: error.message }),
     };
   }
 };
