@@ -1,3 +1,4 @@
+import * as AWS from 'aws-sdk';
 import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
@@ -14,7 +15,7 @@ export class SocialNetworkStack extends cdk.Stack {
     // Use the labRole provided to the stack
     const labRole = iam.Role.fromRoleArn(this, 'LabRole', "arn:aws:iam::492027459158:role/LabRole", { mutable: false });
 
-    // Create an S3 bucket for profile pictures
+    // S3 Bucket for Profile Pictures
     const profilePicturesBucket = new s3.Bucket(this, 'ProfilePicturesBucket', {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
@@ -23,7 +24,7 @@ export class SocialNetworkStack extends cdk.Stack {
     const usersTable = this.createDynamoDBTable(labRole);
 
     // Create an S3 bucket for deployment artifacts using the labRole
-    const deploymentBucket = this.deployTheApplicationArtifactToS3Bucket(labRole);
+    //const deploymentBucket = this.deployTheApplicationArtifactToS3Bucket(labRole);
 
     // Environment variables common to all functions
     const commonEnv = {
@@ -36,8 +37,13 @@ export class SocialNetworkStack extends cdk.Stack {
     const postUserFunction = this.createUserLambdaFunction('createUser.handler', '../app/createUser', commonEnv, labRole);
     const deleteUserFunction = this.createUserLambdaFunction('deleteUser.handler', '../app/deleteUser', commonEnv, labRole);
 
+    const generatePresignedUrlFunction = this.createUserLambdaFunction('generatePresignedUrl.handler', '../app/generatePresignedUrl', commonEnv, labRole);
+
+    // Add permissions to the Lambda functions to access the S3 bucket
+    profilePicturesBucket.grantPut(generatePresignedUrlFunction);
+
     // Create an API Gateway to expose the Lambda functions as a REST API
-    const api = this.createApiGateway(getUserFunction, postUserFunction, deleteUserFunction);
+    const api = this.createApiGateway(getUserFunction, postUserFunction, deleteUserFunction, generatePresignedUrlFunction);
 
     // Output the API Gateway URL
     new cdk.CfnOutput(this, 'APIGatewayURL', {
@@ -58,16 +64,17 @@ export class SocialNetworkStack extends cdk.Stack {
     return userHandler;
   }
 
-  private createApiGateway(getUserFunction: lambda.Function, postUserFunction: lambda.Function, deleteUserFunction: lambda.Function): apigateway.RestApi {
+  private createApiGateway(getUserFunction: lambda.Function, postUserFunction: lambda.Function, deleteUserFunction: lambda.Function, generatePresignedUrlFunction: lambda.Function): apigateway.RestApi {
     const api = new apigateway.RestApi(this, 'UserApi', {
       restApiName: 'User Service',
       description: 'This service handles user operations for the social network.',
     });
 
     const users = api.root.addResource('users');
+    const userById = users.addResource('{userId}');
+    const profileUpload = users.addResource('profileupload');
 
     // Resource for GET /users/{userId}
-    const userById = users.addResource('{userId}');
     userById.addMethod('GET', new apigateway.LambdaIntegration(getUserFunction)); // Get a user by ID
 
     // Resource for POST /users
@@ -75,6 +82,9 @@ export class SocialNetworkStack extends cdk.Stack {
 
     // Resource for DELETE /users/{userId}
     userById.addMethod('DELETE', new apigateway.LambdaIntegration(deleteUserFunction)); // Delete a user by ID
+
+    // Resource for POST /users/profileupload
+    profileUpload.addMethod('POST', new apigateway.LambdaIntegration(generatePresignedUrlFunction)); // Generate a pre-signed URL for uploading a profile picture
 
     return api;
   }

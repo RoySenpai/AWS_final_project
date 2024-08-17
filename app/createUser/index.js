@@ -21,6 +21,7 @@ exports.handler = async (event) => {
         UserID: userId,
         Username: name,
         UserEmail: email,
+        hasProfilePicture: false,
       },
     };
 
