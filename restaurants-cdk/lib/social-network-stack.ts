@@ -1,51 +1,99 @@
-import * as AWS from 'aws-sdk';
 import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
+import * as sqs from 'aws-cdk-lib/aws-sqs';
+import * as sns from 'aws-cdk-lib/aws-sns';
+import * as snsSubscriptions from 'aws-cdk-lib/aws-sns-subscriptions';
 import * as iam from 'aws-cdk-lib/aws-iam';
-import * as s3Deployment from 'aws-cdk-lib/aws-s3-deployment';
 
 export class SocialNetworkStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-    // Use the labRole provided to the stack
+    // Existing IAM Role (Lab Role)
     const labRole = iam.Role.fromRoleArn(this, 'LabRole', "arn:aws:iam::492027459158:role/LabRole", { mutable: false });
 
-    // S3 Bucket for Profile Pictures
+    // Existing S3 Bucket for Profile Pictures
     const profilePicturesBucket = new s3.Bucket(this, 'ProfilePicturesBucket', {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
 
-    // Create a DynamoDB table for users
+    // Existing DynamoDB Table for users
     const usersTable = this.createDynamoDBTable(labRole);
 
-    // Create an S3 bucket for deployment artifacts using the labRole
-    //const deploymentBucket = this.deployTheApplicationArtifactToS3Bucket(labRole);
+    // New DynamoDB Tables for Posts and Comments
+    const postsTable = new dynamodb.Table(this, 'PostsTable', {
+      partitionKey: { name: 'PostID', type: dynamodb.AttributeType.STRING },
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+    });
 
-    // Environment variables common to all functions
+    const commentsTable = new dynamodb.Table(this, 'CommentsTable', {
+      partitionKey: { name: 'CommentID', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'PostID', type: dynamodb.AttributeType.STRING },
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+    });
+
+    // New SQS Queue for Sentiment Analysis
+    const sentimentAnalysisQueue = new sqs.Queue(this, 'SentimentAnalysisQueue', {
+      visibilityTimeout: cdk.Duration.seconds(300),
+      retentionPeriod: cdk.Duration.days(4),
+    });
+
+    // New SNS Topic for Sentiment Notifications
+    const sentimentNotificationTopic = new sns.Topic(this, 'SentimentNotificationTopic');
+    sentimentNotificationTopic.addSubscription(new snsSubscriptions.EmailSubscription('owner@example.com'));
+
+    // Existing Environment variables
     const commonEnv = {
       USERS_TABLE_NAME: usersTable.tableName,
       BUCKET_NAME: profilePicturesBucket.bucketName,
     };
 
-    // Create Lambda functions for different API operations
+    // New Environment variables for sentiment analysis
+    const sentimentEnv = {
+      COMMENTS_TABLE_NAME: commentsTable.tableName,
+      POSTS_TABLE_NAME: postsTable.tableName,
+      SENTIMENT_ANALYSIS_QUEUE_URL: sentimentAnalysisQueue.queueUrl,
+      NOTIFICATION_TOPIC_ARN: sentimentNotificationTopic.topicArn,
+    };
+
+    // Existing Lambda Functions for User Operations
     const getUserFunction = this.createUserLambdaFunction('getUser.handler', '../app/getUser', commonEnv, labRole);
     const postUserFunction = this.createUserLambdaFunction('createUser.handler', '../app/createUser', commonEnv, labRole);
     const deleteUserFunction = this.createUserLambdaFunction('deleteUser.handler', '../app/deleteUser', commonEnv, labRole);
-
     const generatePresignedUrlFunction = this.createUserLambdaFunction('generatePresignedUrl.handler', '../app/generatePresignedUrl', commonEnv, labRole);
 
-    // Add permissions to the Lambda functions to access the S3 bucket
-    profilePicturesBucket.grantPut(generatePresignedUrlFunction);
+    // New Lambda Functions for Sentiment Analysis
+    const addCommentFunction = this.createUserLambdaFunction('addComment.handler', '../app/addComment', sentimentEnv, labRole);
+    const performSentimentAnalysisFunction = this.createUserLambdaFunction('sentimentAnalysis.handler', '../app/sentimentAnalysis', sentimentEnv, labRole);
+    const notifyPostOwnerFunction = this.createUserLambdaFunction('notifyOwner.handler', '../app/notifyOwner', sentimentEnv, labRole);
 
-    // Create an API Gateway to expose the Lambda functions as a REST API
+    // Permissions for Sentiment Analysis
+    commentsTable.grantReadWriteData(addCommentFunction);
+    commentsTable.grantReadWriteData(performSentimentAnalysisFunction);
+    postsTable.grantReadWriteData(performSentimentAnalysisFunction);
+    postsTable.grantReadWriteData(notifyPostOwnerFunction);
+    sentimentAnalysisQueue.grantSendMessages(addCommentFunction);
+    sentimentAnalysisQueue.grantConsumeMessages(performSentimentAnalysisFunction);
+    sentimentNotificationTopic.grantPublish(notifyPostOwnerFunction);
+
+    // Existing API Gateway setup
     const api = this.createApiGateway(getUserFunction, postUserFunction, deleteUserFunction, generatePresignedUrlFunction);
 
-    // Output the API Gateway URL
+    // Adding API resource for comments
+    const posts = api.root.addResource('posts');
+    const postById = posts.addResource('{postId}');
+    const comments = postById.addResource('comments');
+
+    // POST /posts/{postId}/comments
+    comments.addMethod('POST', new apigateway.LambdaIntegration(addCommentFunction));
+
+    // Output API Gateway URL
     new cdk.CfnOutput(this, 'APIGatewayURL', {
       value: api.url,
       description: 'The URL of the API Gateway',
@@ -62,6 +110,20 @@ export class SocialNetworkStack extends cdk.Stack {
     });
 
     return userHandler;
+  }
+
+  private createDynamoDBTable(labRole: iam.IRole): dynamodb.Table {
+    const table = new dynamodb.Table(this, 'UsersTable', {
+      partitionKey: { name: 'UserID', type: dynamodb.AttributeType.STRING },
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+    });
+
+    new cdk.CfnOutput(this, 'TableName', {
+      value: table.tableName,
+    });
+
+    return table;
   }
 
   private createApiGateway(getUserFunction: lambda.Function, postUserFunction: lambda.Function, deleteUserFunction: lambda.Function, generatePresignedUrlFunction: lambda.Function): apigateway.RestApi {
@@ -87,39 +149,5 @@ export class SocialNetworkStack extends cdk.Stack {
     profileUpload.addMethod('POST', new apigateway.LambdaIntegration(generatePresignedUrlFunction)); // Generate a pre-signed URL for uploading a profile picture
 
     return api;
-  }
-
-  private deployTheApplicationArtifactToS3Bucket(labRole: iam.IRole): s3.Bucket {
-    const bucket = new s3.Bucket(this, 'DeploymentArtifact', {
-      removalPolicy: cdk.RemovalPolicy.RETAIN_ON_UPDATE_OR_DELETE,
-    });
-
-    new s3Deployment.BucketDeployment(this, 'DeployWebsite', {
-      sources: [s3Deployment.Source.asset('./../app', {
-        exclude: ['node_modules'],
-      })],
-      destinationBucket: bucket,
-      role: labRole,  // Use labRole for deployment
-    });
-
-    new cdk.CfnOutput(this, 'BucketName', {
-      value: bucket.bucketName,
-    });
-
-    return bucket;
-  }
-
-  private createDynamoDBTable(labRole: iam.IRole): dynamodb.Table {
-    const table = new dynamodb.Table(this, 'UsersTable', {
-      partitionKey: { name: 'UserID', type: dynamodb.AttributeType.STRING },
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
-      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-    });
-
-    new cdk.CfnOutput(this, 'TableName', {
-      value: table.tableName,
-    });
-
-    return table;
   }
 }

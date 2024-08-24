@@ -3,62 +3,38 @@ const dynamoDb = new AWS.DynamoDB.DocumentClient();
 
 exports.handler = async (event) => {
   try {
-    const { userId } = event.pathParameters;
+    console.log("Received event:", JSON.stringify(event, null, 2));
+
+    const userId = event.pathParameters.userId;
+    console.log("Fetching details for UserID:", userId);
 
     const params = {
-      TableName: process.env.USERS_TABLE_NAME,
-      Key: {
-        UserID: userId,
-      },
+      TableName: process.env.USERS_TABLE_NAME, // Add the TableName here
+      Key: { UserID: userId },
     };
 
-    const result = await dynamoDb.get(params).promise();
+    console.log("DynamoDB get params:", JSON.stringify(params, null, 2));
+    const data = await dynamoDb.get(params).promise();
 
-    if (result.Item) {
-
-      if (result.Item.hasProfilePicture) {
-
-        // First check if the user has a profile picture and if so, generate a signed URL
-        const s3 = new AWS.S3();
-        s3.config.update({ region: "us-east-1" });
-
-        const obj = s3.getObject({
-          Bucket: process.env.BUCKET_NAME,
-          Key: `profile-pictures/${userId}.jpg`,
-        });
-
-        if (obj) {
-          const signedUrl = s3.getSignedUrl('getObject', {
-            Bucket: process.env.BUCKET_NAME,
-            Key: `profile-pictures/${userId}.jpg`,
-            Expires: 60 * 5,
-          });
-
-          return {
-            statusCode: 200,
-            body: JSON.stringify({
-              userId: result.Item.UserID,
-              name: result.Item.Username,
-              email: result.Item.UserEmail,
-              profilePictureUrl: signedUrl,
-            }),
-          }
-        }
-      }
-
-      else {
-        return {
-          statusCode: 200,
-          body: JSON.stringify({
-            userId: result.Item.UserID,
-            name: result.Item.Username,
-            email: result.Item.UserEmail,
-            profilePictureUrl: "No profile picture",
-          }),
-        }
-      }
+    if (!data.Item) {
+      console.error("User not found for UserID:", userId);
+      return {
+        statusCode: 404,
+        body: JSON.stringify({ error: 'User not found' }),
+      };
     }
+
+    console.log("User found:", JSON.stringify(data.Item, null, 2));
+    return {
+      statusCode: 200,
+      body: JSON.stringify({
+        userId: data.Item.UserID,
+        name: data.Item.Username,
+        email: data.Item.UserEmail,
+      }),
+    };
   } catch (error) {
+    console.error("Error in getUser:", error);
     return {
       statusCode: 500,
       body: JSON.stringify({ error: 'Could not retrieve user', details: error.message }),
