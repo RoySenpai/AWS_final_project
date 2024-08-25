@@ -1,6 +1,8 @@
 const AWS = require('aws-sdk');
 const dynamoDB = new AWS.DynamoDB.DocumentClient();
 const sqs = new AWS.SQS();
+AWS.config.update({ region: process.env.AWS_REGION || 'us-east-1' });
+
 
 exports.handler = async (event) => {
     const { commentId, postId, userId, commentText } = JSON.parse(event.body);

@@ -2,6 +2,8 @@ const AWS = require('aws-sdk');
 const S3 = new AWS.S3();
 const dynamoDb = new AWS.DynamoDB.DocumentClient();
 S3.config.update({ region: "us-east-1" });
+AWS.config.update({ region: process.env.AWS_REGION || 'us-east-1' });
+
 
 exports.handler = async (event) => {
   try {

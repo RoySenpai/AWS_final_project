@@ -1,6 +1,8 @@
 const AWS = require('aws-sdk');
 const comprehend = new AWS.Comprehend();
 const dynamoDB = new AWS.DynamoDB.DocumentClient();
+AWS.config.update({ region: process.env.AWS_REGION || 'us-east-1' });
+
 
 exports.handler = async (event) => {
     const { Records } = event;

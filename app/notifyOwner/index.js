@@ -1,6 +1,8 @@
 const AWS = require('aws-sdk');
 const dynamoDB = new AWS.DynamoDB.DocumentClient();
 const sns = new AWS.SNS();
+AWS.config.update({ region: process.env.AWS_REGION || 'us-east-1' });
+
 
 exports.handler = async (event) => {
     const { postId } = event.Records[0].dynamodb.Keys;
