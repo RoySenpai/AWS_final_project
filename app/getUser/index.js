@@ -4,10 +4,17 @@ AWS.config.update({ region: process.env.AWS_REGION || 'us-east-1' });
 
 
 exports.handler = async (event) => {
-  try {
     console.log("Received event:", JSON.stringify(event, null, 2));
 
     const userId = event.pathParameters.userId;
+
+    if (!userId) {
+      console.error("UserID not provided");
+      return {
+        statusCode: 400,
+        body: JSON.stringify({ error: 'UserID not provided' }),
+      };
+    }
     console.log("Fetching details for UserID:", userId);
 
     const params = {
@@ -35,11 +42,5 @@ exports.handler = async (event) => {
         email: data.Item.UserEmail,
       }),
     };
-  } catch (error) {
-    console.error("Error in getUser:", error);
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: 'Could not retrieve user', details: error.message }),
-    };
-  }
+
 };

@@ -24,6 +24,8 @@ export class SocialNetworkStack extends cdk.Stack {
     // Existing DynamoDB Table for users
     const usersTable = this.createDynamoDBTable(labRole);
 
+    // console.log('Table Name: ' + usersTable.tableName);
+
     // New DynamoDB Tables for Posts and Comments
     const postsTable = new dynamodb.Table(this, 'PostsTable', {
       partitionKey: { name: 'PostID', type: dynamodb.AttributeType.STRING },

@@ -21,21 +21,27 @@ exports.handler = async (event) => {
 
     const fileName = `profile-pictures/${userId}.jpg`;
     const bucketName = process.env.BUCKET_NAME;
+    console.log("Bucket Name:", bucketName);
 
     console.log("Fetching user to verify existence with UserID:", userId);
     const userParams = {
       TableName: process.env.USERS_TABLE_NAME, // Add the TableName here
       Key: { UserID: userId }
     };
+    console.log("DynamoDB get params:", JSON.stringify(userParams, null, 2));
 
     const userResult = await dynamoDb.get(userParams).promise();
 
+    
     if (!userResult.Item) {
       console.error("User not found for UserID:", userId);
       return {
         statusCode: 404,
         body: JSON.stringify({ error: 'User not found' }),
       };
+    }
+    else {
+      console.log("User found for UserID:", userId);
     }
 
     const params = {
@@ -46,9 +52,22 @@ exports.handler = async (event) => {
     };
 
     console.log("S3 getSignedUrlPromise params:", JSON.stringify(params, null, 2));
+
     const signedUrl = await S3.getSignedUrlPromise('putObject', params);
 
+    if (!signedUrl) {
+      console.error("Failed to generate signed URL for upload");
+      return {
+        statusCode: 500,
+        body: JSON.stringify({ error: 'Failed to generate signed URL for upload' }),
+      };
+    }
+    else {
+      console.log("Signed URL generated for upload:", signed);
+    }
+
     console.log("Updating user record to indicate profile picture upload");
+
     const updateParams = {
       TableName: process.env.USERS_TABLE_NAME, // Add the TableName here
       Key: { UserID: userId },
@@ -56,8 +75,18 @@ exports.handler = async (event) => {
       ExpressionAttributeValues: { ':hasProfilePicture': true }
     };
 
+    console.log("DynamoDB update params:", JSON.stringify(updateParams, null, 2));
+
     await dynamoDb.update(updateParams).promise();
 
+    if (!signedUrl) {
+      console.error("Failed to update user record to indicate profile picture upload");
+      return {
+        statusCode: 500,
+        body: JSON.stringify({ error: 'Failed to update user record to indicate profile picture upload' }),
+      };
+    }
+    
     console.log("Successfully generated signed URL and updated user record for UserID:", userId);
     return {
       statusCode: 200,

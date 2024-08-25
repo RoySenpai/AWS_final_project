@@ -8,6 +8,14 @@ exports.handler = async (event) => {
     console.log("Received event:", JSON.stringify(event, null, 2));
 
     const userId = event.pathParameters.userId;
+
+    if (!userId) {
+      console.error("UserID is required to delete a user");
+      return {
+        statusCode: 400,
+        body: JSON.stringify({ error: 'UserID is required to delete a user' }),
+      };
+    }
     console.log("Attempting to delete UserID:", userId);
 
     const getParams = {
@@ -16,6 +24,7 @@ exports.handler = async (event) => {
     };
 
     console.log("DynamoDB get params:", JSON.stringify(getParams, null, 2));
+
     const data = await dynamoDb.get(getParams).promise();
 
     if (!data.Item) {
@@ -25,6 +34,7 @@ exports.handler = async (event) => {
         body: JSON.stringify({ error: 'User not found' }),
       };
     }
+    console.log("User found for UserID:", userId);
 
     const deleteParams = {
       TableName: process.env.USERS_TABLE_NAME, // Add the TableName here
@@ -32,7 +42,9 @@ exports.handler = async (event) => {
     };
 
     console.log("DynamoDB delete params:", JSON.stringify(deleteParams, null, 2));
+
     await dynamoDb.delete(deleteParams).promise();
+
     console.log("Successfully deleted user with UserID:", userId);
 
     return {
