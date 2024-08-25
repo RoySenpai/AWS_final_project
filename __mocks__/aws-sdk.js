@@ -1,8 +1,5 @@
 // __mocks__/aws-sdk.js
 
-
-// ======================= Orel =======================
-
 class DocumentClient {
     put = jest.fn(() => {
       return {
@@ -28,11 +25,18 @@ class DocumentClient {
         promise: () => Promise.resolve({}),
       };
     });
-  }
+}
   
-  module.exports = {
-    DynamoDB: {
-      DocumentClient,
-    },
-  };
+class S3 {
+getSignedUrlPromise = jest.fn(() => {
+    return Promise.resolve('https://signed-url-for-upload.com');
+});
+}
+
+module.exports = {
+DynamoDB: {
+    DocumentClient,
+},
+S3,
+};
   
