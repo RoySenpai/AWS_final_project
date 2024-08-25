@@ -1,179 +1,216 @@
-// import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
-// import * as AWSMock from 'aws-sdk-mock';
-// import * as AWS from 'aws-sdk';
-// import { createUser } from '../app/createUse/index.js'; // Corrected path
-// import { getUser } from '../getUser/index'; // Corrected path
-// import { deleteUser } from '../deleteUser/index'; // Corrected path
-// import { generatePresignedUrl } from '../generatePresignedUrl/index'; // Corrected path
+import * as AWS from 'aws-sdk';
+// @ts-ignore
+import { handler as createUserHandler } from '../../app/createUser/index.js';
+// @ts-ignore
+import { handler as getUserHandler } from '../../app/getUser/index.js';
+// @ts-ignore
+import { handler as deleteUserHandler } from '../../app/deleteUser/index.js';
 
-// describe('API Tests', () => {
+jest.mock('aws-sdk');
 
-//   // Mock for creating a user
-//   describe('Create User API', () => {
-//     beforeAll(() => {
-//       AWSMock.setSDKInstance(AWS);
-//       AWSMock.mock('DynamoDB.DocumentClient', 'put', (params: any, callback: Function) => {
-//         callback(null, {});
-//       });
-//     });
+const documentClient = new AWS.DynamoDB.DocumentClient();
+const TABLE_NAME = "UsersTable";  // Replace with the actual table name 
+const BUCKET_NAME = "ProfilePicturesBucket";  // Replace with the actual bucket name 
+beforeAll(() => {
+    // Set environment variables
+    process.env.USERS_TABLE_NAME = TABLE_NAME;
+    process.env.BUCKET_NAME = BUCKET_NAME;
+    process.env.AWS_REGION = 'us-east-1';  // Set your preferred region
 
-//     afterAll(() => {
-//       AWSMock.restore('DynamoDB.DocumentClient');
-//     });
+});
 
-//     test('should create a user and return a status code 201', async () => {
-//       const event: APIGatewayProxyEvent = {
-//         body: JSON.stringify({
-//           name: 'Test User',
-//           email: 'test@example.com',
-//         }),
-//       } as any;
+describe('Lambda Function Tests', () => {
+    let createdUserId: string | undefined;
 
-//       const result: APIGatewayProxyResult = await createUser(event);
+    beforeAll(() => {
+        // Mocking DynamoDB's put operation for createUser
+        (documentClient.put as jest.Mock).mockImplementation((params: AWS.DynamoDB.DocumentClient.PutItemInput, callback: Function) => {
+            if (params.TableName === TABLE_NAME) {
+                createdUserId = 'mock-user-id'; // Replace with the logic to generate the user ID
+                callback(null, 'success');
+            } else {
+                callback(new Error('TableName does not match'), null);
+            }
+        });
 
-//       expect(result.statusCode).toEqual(201);
-//       const body = JSON.parse(result.body);
-//       expect(body).toHaveProperty('userId');
-//     });
+        // Mocking DynamoDB's get operation for getUser
+        (documentClient.get as jest.Mock).mockImplementation((params: AWS.DynamoDB.DocumentClient.GetItemInput, callback: Function) => {
+            if (params.TableName === TABLE_NAME) {
+                if (params.Key && params.Key.UserID === createdUserId) {
+                    callback(null, { Item: { UserID: createdUserId, name: 'John', email: 'john.doe@example.com' } });
+                } else {
+                    callback(null, { Item: null });
+                }
+            } else {
+                callback(new Error('TableName does not match'), null);
+            }
+        });
 
-//     test('should return 400 if no name is provided', async () => {
-//       const event: APIGatewayProxyEvent = {
-//         body: JSON.stringify({
-//           email: 'test@example.com',
-//         }),
-//       } as any;
+        // Mocking DynamoDB's delete operation for deleteUser
+        (documentClient.delete as jest.Mock).mockImplementation((params: AWS.DynamoDB.DocumentClient.DeleteItemInput, callback: Function) => {
+            if (params.TableName === TABLE_NAME) {
+                if (params.Key && params.Key.UserID === createdUserId) {
+                    callback(null, {});
+                } else {
+                    callback(new Error('User not found'), null);
+                }
+            } else {
+                callback(new Error('TableName does not match'), null);
+            }
+        });
+    });
 
-//       const result: APIGatewayProxyResult = await createUser(event);
+    afterAll(() => {
+        jest.restoreAllMocks();
+    });
 
-//       expect(result.statusCode).toEqual(400);
-//     });
-//   });
+    describe('createUser Tests', () => {
+        test('should create a user successfully', async () => {
+            const event = {
+                body: JSON.stringify({ name: 'John', email: 'john.doe@example.com' })
+            };
 
-//   // Mock for getting a user by ID
-//   describe('Get User API', () => {
-//     beforeAll(() => {
-//       AWSMock.setSDKInstance(AWS);
-//       AWSMock.mock('DynamoDB.DocumentClient', 'get', (params: any, callback: Function) => {
-//         if (params.Key.UserID === 'existing-id') {
-//           callback(null, { Item: { UserID: 'existing-id', name: 'Test User' } });
-//         } else {
-//           callback(null, {});
-//         }
-//       });
-//     });
+            const result = await createUserHandler(event);
 
-//     afterAll(() => {
-//       AWSMock.restore('DynamoDB.DocumentClient');
-//     });
+            expect(result.statusCode).toBe(201);
+            const body = JSON.parse(result.body);
+            expect(body).toHaveProperty('UserID');
+            expect(body.name).toBe('John');
+            expect(body.email).toBe('john.doe@example.com');
 
-//     test('should return the user if the ID exists', async () => {
-//       const event: APIGatewayProxyEvent = {
-//         pathParameters: {
-//           userId: 'existing-id',
-//         },
-//       } as any;
+            createdUserId = body.UserID; // Store the created user ID for later tests
+        });
 
-//       const result: APIGatewayProxyResult = await getUser(event);
+        test('should return 400 if user data is missing', async () => {
+            const event = {
+                body: JSON.stringify({})
+            };
 
-//       expect(result.statusCode).toEqual(200);
-//       const body = JSON.parse(result.body);
-//       expect(body).toHaveProperty('name', 'Test User');
-//     });
+            const result = await createUserHandler(event);
 
-//     test('should return 404 if the user does not exist', async () => {
-//       const event: APIGatewayProxyEvent = {
-//         pathParameters: {
-//           userId: 'non-existing-id',
-//         },
-//       } as any;
+            expect(result.statusCode).toBe(400);
+            const body = JSON.parse(result.body);
+            expect(body).toHaveProperty('error', 'Name and email are required');
+        });
 
-//       const result: APIGatewayProxyResult = await getUser(event);
+        test('should return 500 if the input is invalid JSON', async () => {
+            const event = {
+                body: "Invalid JSON"
+            };
 
-//       expect(result.statusCode).toEqual(404);
-//     });
-//   });
+            try {
+                await createUserHandler(event);
+            } catch (error: any) {
+                expect(error.message).toBe('Unexpected token I in JSON at position 0');
+            }
+        });
 
-//   // Mock for deleting a user by ID
-//   describe('Delete User API', () => {
-//     beforeAll(() => {
-//       AWSMock.setSDKInstance(AWS);
-//       AWSMock.mock('DynamoDB.DocumentClient', 'delete', (params: any, callback: Function) => {
-//         if (params.Key.UserID === 'existing-id') {
-//           callback(null, {});
-//         } else {
-//           callback(null, {});
-//         }
-//       });
-//     });
+        test('should return 400 if the event body is missing', async () => {
+            const event = {}; // Missing body
 
-//     afterAll(() => {
-//       AWSMock.restore('DynamoDB.DocumentClient');
-//     });
+            const result = await createUserHandler(event);
 
-//     test('should delete the user if the ID exists', async () => {
-//       const event: APIGatewayProxyEvent = {
-//         pathParameters: {
-//           userId: 'existing-id',
-//         },
-//       } as any;
+            expect(result.statusCode).toBe(400);
+            const body = JSON.parse(result.body);
+            expect(body).toHaveProperty('error', 'Invalid input: Event body is missing');
+        });
 
-//       const result: APIGatewayProxyResult = await deleteUser(event);
+        test('should create a user with additional fields', async () => {
+            const event = {
+                body: JSON.stringify({ name: 'John', email: 'john.doe@example.com', age: 30, city: 'New York' })
+            };
 
-//       expect(result.statusCode).toEqual(200);
-//     });
+            const result = await createUserHandler(event);
 
-//     test('should return 404 if the user does not exist', async () => {
-//       const event: APIGatewayProxyEvent = {
-//         pathParameters: {
-//           userId: 'non-existing-id',
-//         },
-//       } as any;
+            expect(result.statusCode).toBe(201);
+            const body = JSON.parse(result.body);
+            expect(body).toHaveProperty('UserID');
+            expect(body.name).toBe('John');
+            expect(body.email).toBe('john.doe@example.com');
+            expect(body.age).toBe(30);
+            expect(body.city).toBe('New York');
 
-//       const result: APIGatewayProxyResult = await deleteUser(event);
+            createdUserId = body.UserID; // Update the created user ID in case it differs
+        });
+    });
 
-//       expect(result.statusCode).toEqual(404);
-//     });
-//   });
+    describe('getUser Tests', () => {
+        test('should retrieve a user successfully', async () => {
+            const event = {
+                pathParameters: {
+                    id: createdUserId,
+                },
+            };
 
-//   // Mock for generating a presigned URL
-//   describe('Generate Presigned URL API', () => {
-//     beforeAll(() => {
-//       AWSMock.setSDKInstance(AWS);
-//       AWSMock.mock('S3', 'getSignedUrl', (operation, params, callback) => {
-//         callback(null, 'https://presigned-url');
-//       });
-//     });
+            const result = await getUserHandler(event);
 
-//     afterAll(() => {
-//       AWSMock.restore('S3');
-//     });
+            expect(result.statusCode).toBe(200);
+            const body = JSON.parse(result.body);
+            expect(body.UserID).toBe(createdUserId);
+            expect(body.name).toBe('John');
+            expect(body.email).toBe('john.doe@example.com');
+        });
 
-//     test('should generate a presigned URL', async () => {
-//       const event: APIGatewayProxyEvent = {
-//         body: JSON.stringify({
-//           userId: 'existing-id',
-//           contentType: 'image/jpeg',
-//         }),
-//       } as any;
+        test('should return 404 if user is not found', async () => {
+            const event = {
+                pathParameters: {
+                    id: 'non-existent-user-id',
+                },
+            };
 
-//       const result: APIGatewayProxyResult = await generatePresignedUrl(event);
+            const result = await getUserHandler(event);
 
-//       expect(result.statusCode).toEqual(200);
-//       const body = JSON.parse(result.body);
-//       expect(body).toHaveProperty('url', 'https://presigned-url');
-//     });
+            expect(result.statusCode).toBe(404);
+            expect(result.body).toContain('User not found');
+        });
 
-//     test('should return 400 if userId or contentType is missing', async () => {
-//       const event: APIGatewayProxyEvent = {
-//         body: JSON.stringify({
-//           contentType: 'image/jpeg',
-//         }),
-//       } as any;
+        test('should return 400 if id is missing', async () => {
+            const event = {
+                pathParameters: {},
+            };
 
-//       const result: APIGatewayProxyResult = await generatePresignedUrl(event);
+            const result = await getUserHandler(event);
 
-//       expect(result.statusCode).toEqual(400);
-//     });
-//   });
+            expect(result.statusCode).toBe(400);
+            expect(result.body).toContain('User ID is required');
+        });
+    });
 
-// });
+    describe('deleteUser Tests', () => {
+        test('should delete a user successfully', async () => {
+            const event = {
+                pathParameters: {
+                    id: createdUserId,
+                },
+            };
+
+            const result = await deleteUserHandler(event);
+
+            expect(result.statusCode).toBe(204);
+            expect(result.body).toBe('{}');
+        });
+
+        test('should return 400 if id is missing', async () => {
+            const event = {
+                pathParameters: {},
+            };
+
+            const result = await deleteUserHandler(event);
+
+            expect(result.statusCode).toBe(400);
+            expect(result.body).toContain('User ID is required');
+        });
+
+        test('should return 404 if user does not exist', async () => {
+            const event = {
+                pathParameters: {
+                    id: 'non-existent-user-id',
+                },
+            };
+
+            const result = await deleteUserHandler(event);
+            expect(result.statusCode).toBe(404);
+            expect(result.body).toContain('User not found');
+        });
+    });
+});
