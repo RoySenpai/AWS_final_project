@@ -6,19 +6,20 @@ exports.handler = async (event) => {
     try {
       console.log("Received event:", JSON.stringify(event, null, 2));
   
-      const postId = event.pathParameters.postid;
-      console.log("Fetching details for PostID:", postId);
+      const { pathParameters } = event;
+      const { postId: PostID } = pathParameters;
+      console.log("Fetching details for PostID:", PostID);
   
       const params = {
         TableName: process.env.POSTS_TABLE_NAME, // Add the TableName here
-        Key: { PostID: postId },
+        Key: { PostID },
       };
   
       console.log("DynamoDB get params:", JSON.stringify(params, null, 2));
       const data = await dynamoDb.get(params).promise();
   
       if (!data.Item) {
-        console.error("Post not found for PostID:", postId);
+        console.error("Post not found for PostID:", PostID);
         return {
           statusCode: 404,
           body: JSON.stringify({ error: 'Post not found' }),
@@ -26,29 +27,31 @@ exports.handler = async (event) => {
       }
   
       console.log("Post found:", JSON.stringify(data.Item, null, 2));
+
+      const { Item } = data;
+      const { CommentIDs } = Item;
+
+      const comments = await Promise.all(CommentIDs.map(async (commentId) => {
+        const commentParams = {
+          TableName: process.env.COMMENTS_TABLE_NAME,
+          Key: { CommentID: commentId },
+        };
+        const commentData = await dynamoDb.get(commentParams).promise();
+
+        return commentData.Item;
+      }));
+
+      return {
+        statusCode: 200,
+        body: JSON.stringify({
+          PostID: Item.PostID,
+          UserID: Item.UserID,
+          Title: Item.Title,
+          Content: Item.Content,
+          Comments: comments,
+        }),
+      };
       
-
-      // Now fetch the comments for this post
-        const commentsParams = {
-            TableName: process.env.COMMENTS_TABLE_NAME,
-            KeyConditionExpression: 'PostID = :postid',
-            ExpressionAttributeValues: { ':postid': postId },
-        };
-
-        const comments = await dynamoDb.query(commentsParams).promise();
-
-        console.log("Comments found:", JSON.stringify(comments.Items, null, 2));
-
-        return {
-            statusCode: 200,
-            body: JSON.stringify({
-                postid: data.Item.PostID,
-                userid: data.Item.UserID,
-                title: data.Item.Title,
-                content: data.Item.Content,
-                comments: comments.Items,
-            }),
-        };
     } catch (error) {
       console.error("Error in getPost:", error);
       return {

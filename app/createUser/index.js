@@ -120,9 +120,6 @@ const AWS = require('aws-sdk');
 AWS.config.update({ region: process.env.AWS_REGION || 'us-east-1' });
 const dynamoDb = new AWS.DynamoDB.DocumentClient();
 
-// Set the correct DynamoDB table name
-process.env.USERS_TABLE_NAME = 'SocialNetworkStack-UsersTable9725E9C8-UO0SP5LJ0DX8';
-
 exports.handler = async (event) => {
     console.log("Received event:", JSON.stringify(event, null, 2));
     console.log("Table Name from ENV:", process.env.USERS_TABLE_NAME);

@@ -4,12 +4,20 @@ const dynamoDb = new AWS.DynamoDB.DocumentClient();
 
 exports.handler = async (event) => {
     try {
-        const { userid, title, content } = JSON.parse(event.body);
+        const { userid: UserID, title, content } = JSON.parse(event.body);
+
+        if (!UserID) {
+            console.error("Validation error: UserID missing");
+            return {
+                statusCode: 400,
+                body: JSON.stringify({ error: 'UserID is required' }),
+            };
+        }
 
         // First check if the user exists
         const userParams = {
             TableName: process.env.USERS_TABLE_NAME,
-            Key: { UserID: userid }
+            Key: { UserID }
         };
 
         const user = await dynamoDb.get(userParams).promise();
@@ -28,9 +36,12 @@ exports.handler = async (event) => {
             TableName: process.env.POSTS_TABLE_NAME,
             Item: {
                 PostID: postId,
-                UserID: userid,
+                UserID,
                 Title: title,
                 Content: content,
+                CommentIDs: [
+                    // Array to store comments
+                ]
             },
         };
 

@@ -23,8 +23,8 @@ export class SocialNetworkStack extends cdk.Stack {
     const usersTable = this.createDynamoDBTable('UsersTable', 'UserID', null, labRole);
 
     // New DynamoDB Tables for Posts and Comments
-    const postsTable = this.createDynamoDBTable('PostsTable', 'PostID', 'UserID', labRole);
-    const commentsTable = this.createDynamoDBTable('CommentID', 'PostID', 'UserID', labRole);
+    const postsTable = this.createDynamoDBTable('PostsTable', 'PostID', null, labRole);
+    const commentsTable = this.createDynamoDBTable('CommentTable', 'CommentID', null, labRole);
 
     // New SQS Queue for Sentiment Analysis
     const sentimentAnalysisQueue = this.createSQSQueue('SentimentAnalysisQueue', cdk.Duration.seconds(300), cdk.Duration.days(4));
