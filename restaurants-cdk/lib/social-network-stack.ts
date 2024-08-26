@@ -17,34 +17,17 @@ export class SocialNetworkStack extends cdk.Stack {
     const labRole = iam.Role.fromRoleArn(this, 'LabRole', "arn:aws:iam::492027459158:role/LabRole", { mutable: false });
 
     // Existing S3 Bucket for Profile Pictures
-    const profilePicturesBucket = new s3.Bucket(this, 'ProfilePicturesBucket', {
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
-    });
+    const profilePicturesBucket = this.createS3Bucket('ProfilePicturesBucket');
 
     // Existing DynamoDB Table for users
-    const usersTable = this.createDynamoDBTable(labRole);
-
-    // console.log('Table Name: ' + usersTable.tableName);
+    const usersTable = this.createDynamoDBTable('UsersTable', 'UserID', null, labRole);
 
     // New DynamoDB Tables for Posts and Comments
-    const postsTable = new dynamodb.Table(this, 'PostsTable', {
-      partitionKey: { name: 'PostID', type: dynamodb.AttributeType.STRING },
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
-      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-    });
-
-    const commentsTable = new dynamodb.Table(this, 'CommentsTable', {
-      partitionKey: { name: 'CommentID', type: dynamodb.AttributeType.STRING },
-      sortKey: { name: 'PostID', type: dynamodb.AttributeType.STRING },
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
-      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-    });
+    const postsTable = this.createDynamoDBTable('PostsTable', 'PostID', 'UserID', labRole);
+    const commentsTable = this.createDynamoDBTable('CommentID', 'PostID', 'UserID', labRole);
 
     // New SQS Queue for Sentiment Analysis
-    const sentimentAnalysisQueue = new sqs.Queue(this, 'SentimentAnalysisQueue', {
-      visibilityTimeout: cdk.Duration.seconds(300),
-      retentionPeriod: cdk.Duration.days(4),
-    });
+    const sentimentAnalysisQueue = this.createSQSQueue('SentimentAnalysisQueue', cdk.Duration.seconds(300), cdk.Duration.days(4));
 
     // New SNS Topic for Sentiment Notifications
     const sentimentNotificationTopic = new sns.Topic(this, 'SentimentNotificationTopic');
@@ -53,6 +36,8 @@ export class SocialNetworkStack extends cdk.Stack {
     // Existing Environment variables
     const commonEnv = {
       USERS_TABLE_NAME: usersTable.tableName,
+      POSTS_TABLE_NAME: postsTable.tableName,
+      COMMENTS_TABLE_NAME: commentsTable.tableName,
       BUCKET_NAME: profilePicturesBucket.bucketName,
     };
 
@@ -70,6 +55,9 @@ export class SocialNetworkStack extends cdk.Stack {
     const deleteUserFunction = this.createUserLambdaFunction('deleteUser.handler', '../app/deleteUser', commonEnv, labRole);
     const generatePresignedUrlFunction = this.createUserLambdaFunction('generatePresignedUrl.handler', '../app/generatePresignedUrl', commonEnv, labRole);
 
+    const addNewPostFunction = this.createUserLambdaFunction('addPost.handler', '../app/addPost', commonEnv, labRole);
+    const getNewPostFunction = this.createUserLambdaFunction('getPost.handler', '../app/getPost', commonEnv, labRole);
+
     // New Lambda Functions for Sentiment Analysis
     const addCommentFunction = this.createUserLambdaFunction('addComment.handler', '../app/addComment', sentimentEnv, labRole);
     const performSentimentAnalysisFunction = this.createUserLambdaFunction('sentimentAnalysis.handler', '../app/sentimentAnalysis', sentimentEnv, labRole);
@@ -85,15 +73,45 @@ export class SocialNetworkStack extends cdk.Stack {
     sentimentNotificationTopic.grantPublish(notifyPostOwnerFunction);
 
     // Existing API Gateway setup
-    const api = this.createApiGateway(getUserFunction, postUserFunction, deleteUserFunction, generatePresignedUrlFunction);
+    const api = new apigateway.RestApi(this, 'UserApi', {
+      restApiName: 'User Service',
+      description: 'This service handles user operations for the social network.',
+    });
 
-    // Adding API resource for comments
-    const posts = api.root.addResource('posts');
-    const postById = posts.addResource('{postId}');
-    const comments = postById.addResource('comments');
+    const usersResource = api.root.addResource('users');
+    const userByIdResource = usersResource.addResource('{userId}');
+    const profileUploadResource = usersResource.addResource('profileupload');
+    const postsResource = api.root.addResource('posts');
+    const postGetResource = postsResource.addResource('{postId}');
+    const commentsResource = postGetResource.addResource('comments');
+    const sentimentResource = api.root.addResource('sentiment');
 
-    // POST /posts/{postId}/comments
-    comments.addMethod('POST', new apigateway.LambdaIntegration(addCommentFunction));
+    // Resource for GET /users/{userId}
+    userByIdResource.addMethod('GET', new apigateway.LambdaIntegration(getUserFunction)); // Get a user by ID
+
+    // Resource for POST /users
+    usersResource.addMethod('POST', new apigateway.LambdaIntegration(postUserFunction)); // Create a new user
+
+    // Resource for DELETE /users/{userId}
+    userByIdResource.addMethod('DELETE', new apigateway.LambdaIntegration(deleteUserFunction)); // Delete a user by ID
+
+    // Resource for POST /users/profileupload
+    profileUploadResource.addMethod('POST', new apigateway.LambdaIntegration(generatePresignedUrlFunction)); // Generate a pre-signed URL for uploading a profile picture
+
+    // Resource for POST /posts
+    postsResource.addMethod('POST', new apigateway.LambdaIntegration(addNewPostFunction)); // Add a new post
+
+
+    postGetResource.addMethod('GET', new apigateway.LambdaIntegration(getNewPostFunction)); // Get a post by ID
+
+    // Resource for POST /posts/{postId}/comments
+    commentsResource.addMethod('POST', new apigateway.LambdaIntegration(addCommentFunction)); // Add a comment to a post
+
+    // Resource for POST /sentiment
+    sentimentResource.addMethod('POST', new apigateway.LambdaIntegration(performSentimentAnalysisFunction));
+
+    // Resource for POST /sentiment/notify
+    sentimentResource.addResource('notify').addMethod('POST', new apigateway.LambdaIntegration(notifyPostOwnerFunction));
 
     // Output API Gateway URL
     new cdk.CfnOutput(this, 'APIGatewayURL', {
@@ -114,42 +132,52 @@ export class SocialNetworkStack extends cdk.Stack {
     return userHandler;
   }
 
-  private createDynamoDBTable(labRole: iam.IRole): dynamodb.Table {
-    const table = new dynamodb.Table(this, 'UsersTable', {
-      partitionKey: { name: 'UserID', type: dynamodb.AttributeType.STRING },
+  private createDynamoDBTable(tableName: string, pKey: string, sKey: string | null, labRole: iam.IRole): dynamodb.Table {
+    var tableProps: dynamodb.TableProps = {
+      partitionKey: { name: pKey, type: dynamodb.AttributeType.STRING },
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-    });
-
-    new cdk.CfnOutput(this, 'TableName', {
+    };
+    
+    // Check if sKey is not null, then create a new TableProps object with the sortKey
+    if (sKey) {
+      tableProps = {
+        ...tableProps,
+        sortKey: { name: sKey, type: dynamodb.AttributeType.STRING },
+      };
+    }
+    
+    const table = new dynamodb.Table(this, tableName, tableProps);
+  
+    new cdk.CfnOutput(this, `${tableName}Name`, {
       value: table.tableName,
     });
-
+  
     return table;
   }
 
-  private createApiGateway(getUserFunction: lambda.Function, postUserFunction: lambda.Function, deleteUserFunction: lambda.Function, generatePresignedUrlFunction: lambda.Function): apigateway.RestApi {
-    const api = new apigateway.RestApi(this, 'UserApi', {
-      restApiName: 'User Service',
-      description: 'This service handles user operations for the social network.',
+  private createS3Bucket(bucketName: string): s3.Bucket {
+    const bucket = new s3.Bucket(this, bucketName, {
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
 
-    const users = api.root.addResource('users');
-    const userById = users.addResource('{userId}');
-    const profileUpload = users.addResource('profileupload');
+    new cdk.CfnOutput(this, `${bucketName}Name`, {
+      value: bucket.bucketName,
+    });
 
-    // Resource for GET /users/{userId}
-    userById.addMethod('GET', new apigateway.LambdaIntegration(getUserFunction)); // Get a user by ID
+    return bucket;
+  }
 
-    // Resource for POST /users
-    users.addMethod('POST', new apigateway.LambdaIntegration(postUserFunction)); // Create a new user
+  private createSQSQueue(queueName: string, visibilityTimeout: cdk.Duration, retentionPeriod: cdk.Duration): sqs.Queue {
+    const queue = new sqs.Queue(this, queueName, {
+      visibilityTimeout: visibilityTimeout,
+      retentionPeriod: retentionPeriod,
+    });
 
-    // Resource for DELETE /users/{userId}
-    userById.addMethod('DELETE', new apigateway.LambdaIntegration(deleteUserFunction)); // Delete a user by ID
+    new cdk.CfnOutput(this, 'QueueURL', {
+      value: queue.queueUrl,
+    });
 
-    // Resource for POST /users/profileupload
-    profileUpload.addMethod('POST', new apigateway.LambdaIntegration(generatePresignedUrlFunction)); // Generate a pre-signed URL for uploading a profile picture
-
-    return api;
+    return queue;
   }
 }

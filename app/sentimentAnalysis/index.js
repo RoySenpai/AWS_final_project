@@ -43,8 +43,8 @@ exports.handler = async (event) => {
     }
 };
 
-function calculateNewSentimentScore(currentScore, newSentiment) {
-    // Implement logic to calculate the new sentiment score based on currentScore and newSentiment
-    // For simplicity, return a placeholder value
-    return 0.75; // Placeholder value
+function calculateNewSentimentScore(currentScore, newSentiment, alpha = 0.1) {
+    // Calculate the new score using exponential moving average
+    const newScore = (1 - alpha) * currentScore + alpha * newSentiment;
+    return newScore;
 }
