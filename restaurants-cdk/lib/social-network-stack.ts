@@ -8,6 +8,7 @@ import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as sns from 'aws-cdk-lib/aws-sns';
 import * as snsSubscriptions from 'aws-cdk-lib/aws-sns-subscriptions';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as lambdaEventSources from 'aws-cdk-lib/aws-lambda-event-sources';
 
 export class SocialNetworkStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -29,9 +30,17 @@ export class SocialNetworkStack extends cdk.Stack {
     // New SQS Queue for Sentiment Analysis
     const sentimentAnalysisQueue = this.createSQSQueue('SentimentAnalysisQueue', cdk.Duration.seconds(300), cdk.Duration.days(4));
 
-    // New SNS Topic for Sentiment Notifications
-    const sentimentNotificationTopic = new sns.Topic(this, 'SentimentNotificationTopic');
-    sentimentNotificationTopic.addSubscription(new snsSubscriptions.EmailSubscription('owner@example.com'));
+    // New Environment variables for sentiment analysis
+    const sentimentEnv = {
+      COMMENTS_TABLE_NAME: commentsTable.tableName,
+      POSTS_TABLE_NAME: postsTable.tableName,
+      SENTIMENT_ANALYSIS_QUEUE_URL: sentimentAnalysisQueue.queueUrl,
+    };
+
+    // Add SQS event source to performSentimentAnalysisFunction
+    const sentimentAnalysisEventSource = new lambdaEventSources.SqsEventSource(sentimentAnalysisQueue);
+    const performSentimentAnalysisFunction = this.createUserLambdaFunction('sentimentAnalysis.handler', '../app/sentimentAnalysis', sentimentEnv, labRole);
+    performSentimentAnalysisFunction.addEventSource(sentimentAnalysisEventSource);
 
     // Existing Environment variables
     const commonEnv = {
@@ -39,14 +48,7 @@ export class SocialNetworkStack extends cdk.Stack {
       POSTS_TABLE_NAME: postsTable.tableName,
       COMMENTS_TABLE_NAME: commentsTable.tableName,
       BUCKET_NAME: profilePicturesBucket.bucketName,
-    };
-
-    // New Environment variables for sentiment analysis
-    const sentimentEnv = {
-      COMMENTS_TABLE_NAME: commentsTable.tableName,
-      POSTS_TABLE_NAME: postsTable.tableName,
       SENTIMENT_ANALYSIS_QUEUE_URL: sentimentAnalysisQueue.queueUrl,
-      NOTIFICATION_TOPIC_ARN: sentimentNotificationTopic.topicArn,
     };
 
     // Existing Lambda Functions for User Operations
@@ -60,7 +62,6 @@ export class SocialNetworkStack extends cdk.Stack {
 
     // New Lambda Functions for Sentiment Analysis
     const addCommentFunction = this.createUserLambdaFunction('addComment.handler', '../app/addComment', sentimentEnv, labRole);
-    const performSentimentAnalysisFunction = this.createUserLambdaFunction('sentimentAnalysis.handler', '../app/sentimentAnalysis', sentimentEnv, labRole);
     const notifyPostOwnerFunction = this.createUserLambdaFunction('notifyOwner.handler', '../app/notifyOwner', sentimentEnv, labRole);
 
     // Permissions for Sentiment Analysis
@@ -70,7 +71,6 @@ export class SocialNetworkStack extends cdk.Stack {
     postsTable.grantReadWriteData(notifyPostOwnerFunction);
     sentimentAnalysisQueue.grantSendMessages(addCommentFunction);
     sentimentAnalysisQueue.grantConsumeMessages(performSentimentAnalysisFunction);
-    sentimentNotificationTopic.grantPublish(notifyPostOwnerFunction);
 
     // Existing API Gateway setup
     const api = new apigateway.RestApi(this, 'UserApi', {
@@ -84,7 +84,6 @@ export class SocialNetworkStack extends cdk.Stack {
     const postsResource = api.root.addResource('posts');
     const postGetResource = postsResource.addResource('{postId}');
     const commentsResource = postGetResource.addResource('comments');
-    const sentimentResource = api.root.addResource('sentiment');
 
     // Resource for GET /users/{userId}
     userByIdResource.addMethod('GET', new apigateway.LambdaIntegration(getUserFunction)); // Get a user by ID
@@ -101,17 +100,13 @@ export class SocialNetworkStack extends cdk.Stack {
     // Resource for POST /posts
     postsResource.addMethod('POST', new apigateway.LambdaIntegration(addNewPostFunction)); // Add a new post
 
-
+    // Resource for GET /posts/{postId}
     postGetResource.addMethod('GET', new apigateway.LambdaIntegration(getNewPostFunction)); // Get a post by ID
 
     // Resource for POST /posts/{postId}/comments
     commentsResource.addMethod('POST', new apigateway.LambdaIntegration(addCommentFunction)); // Add a comment to a post
 
-    // Resource for POST /sentiment
-    sentimentResource.addMethod('POST', new apigateway.LambdaIntegration(performSentimentAnalysisFunction));
-
-    // Resource for POST /sentiment/notify
-    sentimentResource.addResource('notify').addMethod('POST', new apigateway.LambdaIntegration(notifyPostOwnerFunction));
+    
 
     // Output API Gateway URL
     new cdk.CfnOutput(this, 'APIGatewayURL', {

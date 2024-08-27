@@ -161,6 +161,9 @@ exports.handler = async (event) => {
         Username: name,
         UserEmail: email,
         hasProfilePicture: false,
+        postsIDs: [
+          // Array to store posts
+        ],
       },
     };
 
@@ -172,7 +175,7 @@ exports.handler = async (event) => {
       result = await dynamoDb.put(params).promise()
       return {
         statusCode: 201,
-        body: JSON.stringify({ userId, name, email }),
+        body: JSON.stringify({ userId }),
       };
     }
     catch(error) {

@@ -39,6 +39,7 @@ exports.handler = async (event) => {
                 UserID,
                 Title: title,
                 Content: content,
+                SentimentalScore: 0,
                 CommentIDs: [
                     // Array to store comments
                 ]
@@ -46,6 +47,16 @@ exports.handler = async (event) => {
         };
 
         await dynamoDb.put(params).promise();
+
+        await dynamoDb.update({
+            TableName: process.env.USERS_TABLE_NAME,
+            Key: { UserID },
+            UpdateExpression: 'SET PostIDs = list_append(if_not_exists(PostIDs, :empty_list), :post_id)',
+            ExpressionAttributeValues: {
+                ':post_id': [postId],
+                ':empty_list': [],
+            },
+        }).promise();
 
         return {
             statusCode: 201,

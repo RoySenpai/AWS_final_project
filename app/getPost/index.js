@@ -38,8 +38,14 @@ exports.handler = async (event) => {
         };
         const commentData = await dynamoDb.get(commentParams).promise();
 
-        return commentData.Item;
+        return {
+          CommentID: commentData.Item.CommentID,
+          UserID: commentData.Item.UserID,
+          Content: commentData.Item.CommentText
+        };
       }));
+
+      console.log("Comments found:", JSON.stringify(comments, null, 2));
 
       return {
         statusCode: 200,
@@ -48,6 +54,7 @@ exports.handler = async (event) => {
           UserID: Item.UserID,
           Title: Item.Title,
           Content: Item.Content,
+          SentimentalScore: Item.SentimentScore,
           Comments: comments,
         }),
       };

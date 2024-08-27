@@ -52,10 +52,12 @@ exports.handler = async (event) => {
         }).promise();
 
         // Send the comment text to SQS for sentiment analysis
-        await sqs.sendMessage({
+        const result = await sqs.sendMessage({
             QueueUrl: process.env.SENTIMENT_ANALYSIS_QUEUE_URL,
             MessageBody: JSON.stringify({ commentId, postId: PostID, commentText: CommentText }),
         }).promise();
+        
+        console.log('Message sent:', result);
 
         return {
             statusCode: 200,
