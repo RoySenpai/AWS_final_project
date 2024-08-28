@@ -12,6 +12,7 @@
   "dependencies": {
     "aws-sdk": "^2.1675.0",
     "axios": "^1.7.5",
+    "sentiment": "^5.0.2",
     "uuid": "^10.0.0"
   }
 }

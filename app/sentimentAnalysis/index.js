@@ -1,19 +1,31 @@
 const queueUrl = process.env.SENTIMENT_ANALYSIS_QUEUE_URL;
 
+const Sentiment = require('sentiment');
 const AWS = require('aws-sdk');
 const sqs = new AWS.SQS();
-const comprehend = new AWS.Comprehend();
+const dynamoDB = new AWS.DynamoDB.DocumentClient();
+const sent = new Sentiment();
 
 exports.handler = async (event) => {    
     const params = {
         QueueUrl: queueUrl,
         MaxNumberOfMessages: 10, // Adjust to a smaller number for testing
-        VisibilityTimeout: 30,  // Time in seconds for which the message will be invisible after receiving
+        VisibilityTimeout: 20,  // Time in seconds for which the message will be invisible after receiving
         WaitTimeSeconds: 20      // Adjust if you want long polling
     };
+
+    console.log('Receiving messages from queue:', queueUrl);
     
     try {
-        const result = await sqs.receiveMessage(params).promise();
+        const result = await sqs.receiveMessage(params, function(err, data) {
+            if (err) {
+                console.error('Error receiving message:', err);
+                throw err;
+            } else {
+                console.log('Received messages:', data.Messages ? data.Messages.length : 0);
+                return data;
+            }
+        }).promise();
         
         if (result.Messages && result.Messages.length > 0) {
             for (const message of result.Messages) {
@@ -34,20 +46,33 @@ exports.handler = async (event) => {
                 console.log('Post ID:', postId);
                 console.log('Comment Text:', commentText);
 
-                const params = {
-                    LanguageCode: 'en',
-                    Text: commentText
-                }
+                const result = sentiment.analyze(commentText);
+                console.log('Result:', result);
 
-                // Perform sentiment analysis
-                const sentimentData = await comprehend.detectSentiment(params).promise().then(data => {
-                    return data;
-                }).catch(err => {
-                    console.error('Error:', err);
-                    throw err;
-                });
+                const newSentimentScore = calculateNewSentimentScore(post.Item.SentimentScore || 0, result);
 
-                console.log('Sentiment:', sentimentData);
+                // Store the sentiment in the Comments table
+                await dynamoDB.update({
+                     TableName: process.env.COMMENTS_TABLE_NAME,
+                     Key: { CommentID: commentId, PostID: postId },
+                     UpdateExpression: 'set Sentiment = :sentiment',
+                     ExpressionAttributeValues: { ':sentiment': result },
+                }).promise();
+
+                // Update the running sentiment score in the Posts table
+                const post = await dynamoDB.get({
+                    TableName: process.env.POSTS_TABLE_NAME,
+                    Key: { PostID: postId },
+                }).promise();
+
+                await dynamoDB.update({
+                    TableName: process.env.POSTS_TABLE_NAME,
+                    Key: { PostID: postId },
+                    UpdateExpression: 'set SentimentScore = :score',
+                    ExpressionAttributeValues: { ':score': newSentimentScore },
+                }).promise();
+
+                console.log('Updated sentiment score:', newSentimentScore);
             }
         } else {
             console.log('No messages received, or all messages processed');
@@ -57,56 +82,12 @@ exports.handler = async (event) => {
         console.error('Error receiving message:', error);
         throw error;
     }
+
+    console.log('Finished processing messages');
 };
 
-// const AWS = require('aws-sdk');
-// const comprehend = new AWS.Comprehend();
-// const dynamoDB = new AWS.DynamoDB.DocumentClient();
-// AWS.config.update({ region: process.env.AWS_REGION || 'us-east-1' });
-
-
-// exports.handler = async (event) => {
-//     console.log("Received event:", JSON.stringify(event, null, 2));
-//     // const { Records } = event;
-
-//     // for (const record of Records) {
-//     //     const { commentId, postId, commentText } = JSON.parse(record.body);
-
-//     //     // Perform sentiment analysis
-//     //     const sentimentData = await comprehend.detectSentiment({
-//     //         Text: commentText,
-//     //         LanguageCode: 'en',
-//     //     }).promise();
-
-//     //     const sentiment = sentimentData.Sentiment;
-
-//     //     // Store the sentiment in the Comments table
-//     //     await dynamoDB.update({
-//     //         TableName: process.env.COMMENTS_TABLE_NAME,
-//     //         Key: { CommentID: commentId, PostID: postId },
-//     //         UpdateExpression: 'set Sentiment = :sentiment',
-//     //         ExpressionAttributeValues: { ':sentiment': sentiment },
-//     //     }).promise();
-
-//     //     // Update the running sentiment score in the Posts table
-//     //     const post = await dynamoDB.get({
-//     //         TableName: process.env.POSTS_TABLE_NAME,
-//     //         Key: { PostID: postId },
-//     //     }).promise();
-
-//     //     const newSentimentScore = calculateNewSentimentScore(post.Item.SentimentScore, sentiment);
-
-//     //     await dynamoDB.update({
-//     //         TableName: process.env.POSTS_TABLE_NAME,
-//     //         Key: { PostID: postId },
-//     //         UpdateExpression: 'set SentimentScore = :score',
-//     //         ExpressionAttributeValues: { ':score': newSentimentScore },
-//     //     }).promise();
-//     // }
-// };
-
-// function calculateNewSentimentScore(currentScore, newSentiment, alpha = 0.1) {
-//     // Calculate the new score using exponential moving average
-//     const newScore = (1 - alpha) * currentScore + alpha * newSentiment;
-//     return newScore;
-// }
+function calculateNewSentimentScore(currentScore, newSentiment, alpha = 0.1) {
+    // Calculate the new score using exponential moving average
+    const newScore = (1 - alpha) * currentScore + alpha * newSentiment;
+    return newScore;
+}

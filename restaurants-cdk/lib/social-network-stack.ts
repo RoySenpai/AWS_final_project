@@ -122,6 +122,7 @@ export class SocialNetworkStack extends cdk.Stack {
       handler: 'index.handler',  // Use the handler name passed as an argument
       environment: environment,  // Use the environment variables passed as an argument
       role: labRole,  // Assign the labRole to the Lambda function
+      timeout: cdk.Duration.seconds(60),  // Set the timeout to 30 seconds
     });
 
     return userHandler;
