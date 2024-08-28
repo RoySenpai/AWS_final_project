@@ -26,6 +26,8 @@ exports.handler = async (event) => {
                 return data;
             }
         }).promise();
+
+        console.log('SQS Result:', JSON.stringify(result, null, 2));
         
         if (result.Messages && result.Messages.length > 0) {
             for (const message of result.Messages) {
@@ -46,17 +48,15 @@ exports.handler = async (event) => {
                 console.log('Post ID:', postId);
                 console.log('Comment Text:', commentText);
 
-                const result = sentiment.analyze(commentText);
+                const result = sent.analyze(commentText);
                 console.log('Result:', result);
-
-                const newSentimentScore = calculateNewSentimentScore(post.Item.SentimentScore || 0, result);
 
                 // Store the sentiment in the Comments table
                 await dynamoDB.update({
                      TableName: process.env.COMMENTS_TABLE_NAME,
-                     Key: { CommentID: commentId, PostID: postId },
+                     Key: { CommentID: commentId },
                      UpdateExpression: 'set Sentiment = :sentiment',
-                     ExpressionAttributeValues: { ':sentiment': result },
+                     ExpressionAttributeValues: { ':sentiment': result.score },
                 }).promise();
 
                 // Update the running sentiment score in the Posts table
@@ -64,6 +64,8 @@ exports.handler = async (event) => {
                     TableName: process.env.POSTS_TABLE_NAME,
                     Key: { PostID: postId },
                 }).promise();
+
+                const newSentimentScore = calculateNewSentimentScore(post.Item.SentimentScore || 0, result.score);
 
                 await dynamoDB.update({
                     TableName: process.env.POSTS_TABLE_NAME,
