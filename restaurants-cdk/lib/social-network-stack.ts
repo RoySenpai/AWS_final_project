@@ -6,10 +6,9 @@ import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as sns from 'aws-cdk-lib/aws-sns';
-import * as snsSubscriptions from 'aws-cdk-lib/aws-sns-subscriptions';
+import * as sns_subscriptions from 'aws-cdk-lib/aws-sns-subscriptions';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambdaEventSources from 'aws-cdk-lib/aws-lambda-event-sources';
-
 export class SocialNetworkStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
@@ -30,11 +29,16 @@ export class SocialNetworkStack extends cdk.Stack {
     // New SQS Queue for Sentiment Analysis
     const sentimentAnalysisQueue = this.createSQSQueue('SentimentAnalysisQueue', cdk.Duration.seconds(300), cdk.Duration.days(4));
 
+    // New SNS Topic for Notifying Post Owners
+    const notifyPostOwnerTopic = new sns.Topic(this, 'NotifyPostOwnerTopic');
+
     // New Environment variables for sentiment analysis
     const sentimentEnv = {
       COMMENTS_TABLE_NAME: commentsTable.tableName,
       POSTS_TABLE_NAME: postsTable.tableName,
       SENTIMENT_ANALYSIS_QUEUE_URL: sentimentAnalysisQueue.queueUrl,
+      USERS_TABLE_NAME: usersTable.tableName,
+      SENTIMENT_ANALYSIS_TOPIC_ARN: notifyPostOwnerTopic.topicArn,
     };
 
     // Add SQS event source to performSentimentAnalysisFunction
@@ -62,15 +66,15 @@ export class SocialNetworkStack extends cdk.Stack {
 
     // New Lambda Functions for Sentiment Analysis
     const addCommentFunction = this.createUserLambdaFunction('addComment.handler', '../app/addComment', sentimentEnv, labRole);
-    const notifyPostOwnerFunction = this.createUserLambdaFunction('notifyOwner.handler', '../app/notifyOwner', sentimentEnv, labRole);
 
     // Permissions for Sentiment Analysis
     commentsTable.grantReadWriteData(addCommentFunction);
     commentsTable.grantReadWriteData(performSentimentAnalysisFunction);
     postsTable.grantReadWriteData(performSentimentAnalysisFunction);
-    postsTable.grantReadWriteData(notifyPostOwnerFunction);
     sentimentAnalysisQueue.grantSendMessages(addCommentFunction);
     sentimentAnalysisQueue.grantConsumeMessages(performSentimentAnalysisFunction);
+    notifyPostOwnerTopic.grantPublish(performSentimentAnalysisFunction);
+    notifyPostOwnerTopic.addSubscription(new sns_subscriptions.EmailSubscription('me@hiyorix.com')); // Change the email address to your own
 
     // Existing API Gateway setup
     const api = new apigateway.RestApi(this, 'UserApi', {
@@ -105,8 +109,6 @@ export class SocialNetworkStack extends cdk.Stack {
 
     // Resource for POST /posts/{postId}/comments
     commentsResource.addMethod('POST', new apigateway.LambdaIntegration(addCommentFunction)); // Add a comment to a post
-
-    
 
     // Output API Gateway URL
     new cdk.CfnOutput(this, 'APIGatewayURL', {

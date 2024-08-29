@@ -5,6 +5,9 @@ const AWS = require('aws-sdk');
 const sqs = new AWS.SQS();
 const dynamoDB = new AWS.DynamoDB.DocumentClient();
 const sent = new Sentiment();
+const SNSService = new AWS.SNS();
+
+const topicArn = process.env.SENTIMENT_ANALYSIS_TOPIC_ARN;
 
 exports.handler = async (event) => {    
     const params = {
@@ -66,6 +69,29 @@ exports.handler = async (event) => {
                 }).promise();
 
                 const newSentimentScore = calculateNewSentimentScore(post.Item.SentimentScore || 0, result.score);
+
+                // Check if the sentiment score has a negative change
+                if (newSentimentScore < post.Item.SentimentScore) {
+                    // Notify the author of the post
+
+                    // Extract the author's email from the Users table
+                    const user = await dynamoDB.get({
+                        TableName: process.env.USERS_TABLE_NAME,
+                        Key: { UserID: post.Item.UserID },
+                    }).promise();
+
+                    const email = user.Item.UserEmail;
+
+                    console.log('Sending notification to:', email);
+                    const messageToSend = `The sentiment score of your post has changed to ${newSentimentScore.toFixed(2)}`;
+                    await SNSService.publish({
+                        Message: JSON.stringify({ email, messageToSend }),
+                        Subject: 'Sentiment score update',
+                        TopicArn: topicArn,
+                    }).promise();
+
+                    console.log('Sent notification to:', email);
+                }
 
                 await dynamoDB.update({
                     TableName: process.env.POSTS_TABLE_NAME,
