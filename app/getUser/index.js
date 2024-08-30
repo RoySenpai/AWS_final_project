@@ -22,44 +22,54 @@ exports.handler = async (event) => {
       Key: { UserID: userId },
     };
 
-    console.log("DynamoDB get params:", JSON.stringify(params, null, 2));
-    const data = await dynamoDb.get(params).promise();
+    try
+    {
+      console.log("DynamoDB get params:", JSON.stringify(params, null, 2));
+      const data = await dynamoDb.get(params).promise();
 
-    if (!data.Item) {
-      console.error("User not found for UserID:", userId);
+      if (!data.Item) {
+        console.error("User not found for UserID:", userId);
+        return {
+          statusCode: 404,
+          body: JSON.stringify({ error: 'User not found' }),
+        };
+      }
+
+      const { Item } = data;
+      const { PostIDs } = Item;
+
+      const posts = await Promise.all(PostIDs.map(async (postId) => {
+        const postParams = {
+          TableName: process.env.POSTS_TABLE_NAME,
+          Key: { PostID: postId },
+        };
+        const postData = await dynamoDb.get(postParams).promise();
+
+        return {
+          PostID: postData.Item.PostID,
+          Title: postData.Item.Title,
+          Content: postData.Item.Content,
+          SentimentalScore: postData.Item.SentimentScore,
+        };
+      }));
+
+      console.log("User found:", JSON.stringify(data.Item, null, 2));
       return {
-        statusCode: 404,
-        body: JSON.stringify({ error: 'User not found' }),
+        statusCode: 200,
+        body: JSON.stringify({
+          userId: data.Item.UserID,
+          name: data.Item.Username,
+          email: data.Item.UserEmail,
+          posts: posts,
+        }),
       };
     }
 
-    const { Item } = data;
-    const { postsIDs } = Item;
-
-    const posts = await Promise.all(postsIDs.map(async (postId) => {
-      const postParams = {
-        TableName: process.env.POSTS_TABLE_NAME,
-        Key: { PostID: postId },
-      };
-      const postData = await dynamoDb.get(postParams).promise();
-
+    catch (error) {
+      console.error("Error fetching user details:", error);
       return {
-        PostID: postData.Item.PostID,
-        Title: postData.Item.Title,
-        Content: postData.Item.Content,
-        SentimentalScore: postData.Item.SentimentScore,
+        statusCode: 500,
+        body: JSON.stringify({ error: 'Error fetching user details', details: error.message }),
       };
-    }));
-
-    console.log("User found:", JSON.stringify(data.Item, null, 2));
-    return {
-      statusCode: 200,
-      body: JSON.stringify({
-        userId: data.Item.UserID,
-        name: data.Item.Username,
-        email: data.Item.UserEmail,
-        posts: posts,
-      }),
-    };
-
+    }
 };

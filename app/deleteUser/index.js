@@ -45,6 +45,39 @@ exports.handler = async (event) => {
 
     await dynamoDb.delete(deleteParams).promise();
 
+    // Delete all posts by the user, all his comments and all the comments on his posts
+    const userPosts = data.Item.PostIDs || [];
+
+    await Promise.all(userPosts.map(async (postId) => {
+      const getPostParams = {
+        TableName: process.env.POSTS_TABLE_NAME,
+        Key: { PostID: postId },
+      };
+
+      const postData = await dynamoDb.get(getPostParams).promise();
+      const postComments = postData.Item.CommentIDs || [];
+
+      await Promise.all(postComments.map(async (commentId) => {
+        const deleteCommentParams = {
+          TableName: process.env.COMMENTS_TABLE_NAME,
+          Key: { CommentID: commentId },
+        };
+
+        console.log("DynamoDB delete comment params:", JSON.stringify(deleteCommentParams, null, 2));
+
+        await dynamoDb.delete(deleteCommentParams).promise();
+      }));
+
+      const deletePostParams = {
+        TableName: process.env.POSTS_TABLE_NAME,
+        Key: { PostID: postId },
+      };
+
+      console.log("DynamoDB delete post params:", JSON.stringify(deletePostParams, null, 2));
+
+      await dynamoDb.delete(deletePostParams).promise();
+    }));
+
     console.log("Successfully deleted user with UserID:", userId);
 
     return {

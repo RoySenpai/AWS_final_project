@@ -161,7 +161,7 @@ exports.handler = async (event) => {
         Username: name,
         UserEmail: email,
         hasProfilePicture: false,
-        postsIDs: [
+        PostIDs: [
           // Array to store posts
         ],
       },

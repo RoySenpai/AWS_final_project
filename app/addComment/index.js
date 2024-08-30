@@ -38,6 +38,7 @@ exports.handler = async (event) => {
                 PostID,
                 UserID,
                 CommentText,
+                Sentiment: 0,
             },
         }).promise();
 
