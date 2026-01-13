@@ -10,7 +10,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "aws-sdk": "^2.1675.0",
+    "aws-sdk": "^2.1693.0",
     "axios": "^1.12.0",
     "sentiment": "^5.0.2",
     "uuid": "^10.0.0"
