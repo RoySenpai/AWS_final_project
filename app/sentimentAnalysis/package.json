@@ -11,7 +11,7 @@
   "description": "",
   "dependencies": {
     "aws-sdk": "^2.1693.0",
-    "axios": "^1.15.2",
+    "axios": "^1.16.0",
     "sentiment": "^5.0.2",
     "uuid": "^14.0.0"
   }
