@@ -11,6 +11,6 @@
   "description": "",
   "dependencies": {
     "aws-sdk": "^2.1693.0",
-    "uuid": "^14.0.0"
+    "uuid": "^14.0.1"
   }
 }
